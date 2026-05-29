@@ -178,18 +178,12 @@ class Gateway:
             print(f"[gateway] sent ICE: {candidate.type} {candidate.ip}:{candidate.port}")
 
     async def run(self) -> None:
-        try:
-            while True:
-                try:
-                    await self._connect()
-                except (websockets.ConnectionClosed, OSError) as e:
-                    print(f"[gateway] signaling lost: {e}, reconnecting in 3s...")
-                    await asyncio.sleep(3)
-        finally:
-            if self.pc:
-                await self.pc.close()
-            if self._http_session and not self._http_session.closed:
-                await self._http_session.close()
+        while True:
+            try:
+                await self._connect()
+            except (websockets.ConnectionClosed, OSError) as e:
+                print(f"[gateway] signaling lost: {e}, reconnecting in 3s...")
+                await asyncio.sleep(3)
 
     async def _connect(self) -> None:
         async with websockets.connect(ARGS.signaling) as ws:
