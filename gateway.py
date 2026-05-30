@@ -28,12 +28,12 @@ def parse_args() -> argparse.Namespace:
     )
     p.add_argument(
         "--signaling",
-        default=os.getenv("SIGNALING_URL", "wss://http2p.dx512.com/ws"),
+        default=os.getenv("SIGNALING_URL", "wss://http2p.cjccjj.workers.dev/ws"),
         help="Signaling server WebSocket URL",
     )
     p.add_argument(
         "--legacy-base",
-        default=os.getenv("LEGACY_BASE", "http://127.0.0.1:4000"),
+        default=os.getenv("LEGACY_BASE", "http://127.0.0.1:8080"),
         help="Base URL of the legacy HTTP server",
     )
     p.add_argument(

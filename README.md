@@ -56,17 +56,17 @@ python gateway.py --public-ip 203.0.113.5 --legacy-base http://127.0.0.1:8080
 | Flag | Default | Description |
 |---|---|---|
 | `--public-ip` | (required) | Your server's public IP |
-| `--legacy-base` | `http://127.0.0.1:4000` | Base URL of the HTTP server |
-| `--signaling` | `wss://http2p.dx512.com/ws` | Signaling server (or self-host) |
+| `--legacy-base` | `http://127.0.0.1:8080` | Base URL of the HTTP server |
+| `--signaling` | `wss://http2p.cjccjj.workers.dev/ws` | Signaling server (or self-host) |
 | `--webrtc-port` | `40000` | UDP port for the WebRTC tunnel |
 
 ### 4. Access from a browser
 
 ```
-https://http2p.dx512.com/wr/203.0.113.5/path/to/file
+https://http2p.cjccjj.workers.dev/wr/203.0.113.5/path/to/file
 ```
 
-Or visit `https://http2p.dx512.com/` for the interactive debug panel.
+Or visit `https://http2p.cjccjj.workers.dev/` for the interactive debug panel.
 
 ## Architecture
 
@@ -74,7 +74,7 @@ Or visit `https://http2p.dx512.com/` for the interactive debug panel.
 Browser ═══ WebRTC DTLS tunnel ═══ Gateway ─── HTTP ─── Legacy Server
    │         (encrypted, direct)       (local)
    │
-   └── wss://signaling (SDP/ICE only, ~KB text)
+   └── wss://http2p.cjccjj.workers.dev/ws (SDP/ICE only, ~KB text)
 ```
 
 | Component | Hosted by | Description |
@@ -94,7 +94,7 @@ Signaling sees only connection metadata (SDP/ICE). All data flows direct browser
 
 ## Self-hosting the signaling service
 
-If you don't want to use the free public service at `wss://http2p.dx512.com/ws`:
+If you don't want to use the free public service at `wss://http2p.cjccjj.workers.dev/ws`:
 
 - **Cloudflare Workers:** Deploy `http2p_front/index.js` to your own Worker using `npx wrangler deploy`
 - **Python (dev):** Run `python signaling.py` (listens on `127.0.0.1:9877`)
