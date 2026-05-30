@@ -56,17 +56,6 @@ def parse_args() -> argparse.Namespace:
 
 ARGS = parse_args()
 
-_original_cde = asyncio.BaseEventLoop.create_datagram_endpoint
-
-
-async def _patched_cde(self, protocol_factory, local_addr=None, **kwargs):
-    if local_addr and isinstance(local_addr, tuple) and len(local_addr) >= 2 and local_addr[1] == 0:
-        local_addr = (local_addr[0], ARGS.webrtc_port)
-    return await _original_cde(self, protocol_factory, local_addr=local_addr, **kwargs)
-
-
-asyncio.BaseEventLoop.create_datagram_endpoint = _patched_cde
-
 
 class Gateway:
     def __init__(self) -> None:
@@ -75,10 +64,14 @@ class Gateway:
         self.ws = None
         self._ice_queue: asyncio.Queue = asyncio.Queue()
         self._http_session: aiohttp.ClientSession | None = None
+        self._ice_task: asyncio.Task | None = None
 
     async def _get_session(self) -> aiohttp.ClientSession:
-        if self._http_session is None or self._http_session.closed:
-            self._http_session = aiohttp.ClientSession()
+        if self._http_session is not None and not self._http_session.closed:
+            return self._http_session
+        if self._http_session is not None:
+            await self._http_session.close()
+        self._http_session = aiohttp.ClientSession()
         return self._http_session
 
     def setup_peer(self) -> None:
@@ -110,7 +103,10 @@ class Gateway:
             def on_message(msg):
                 if isinstance(msg, str) and msg.startswith("SEND "):
                     path = msg[5:].strip()
-                    asyncio.ensure_future(self._handle_request(channel, path))
+                    task = asyncio.create_task(self._handle_request(channel, path))
+                    task.add_done_callback(
+                        lambda t: t.exception() and print(f"[gateway] task error: {t.exception()}")
+                    )
 
     async def _handle_request(self, channel, path: str) -> None:
         url = f"{ARGS.legacy_base}{path}"
@@ -162,20 +158,23 @@ class Gateway:
         return "\r\n".join(lines) + "\r\n"
 
     async def send_ice_loop(self) -> None:
-        while True:
-            candidate = await self._ice_queue.get()
-            await self.ws.send(
-                json.dumps(
-                    {
-                        "type": "ice",
-                        "to": "browser",
-                        "candidate": candidate.candidate,
-                        "sdpMid": candidate.sdpMid,
-                        "sdpMLineIndex": candidate.sdpMLineIndex,
-                    }
+        try:
+            while True:
+                candidate = await self._ice_queue.get()
+                await self.ws.send(
+                    json.dumps(
+                        {
+                            "type": "ice",
+                            "to": "browser",
+                            "candidate": candidate.candidate,
+                            "sdpMid": candidate.sdpMid,
+                            "sdpMLineIndex": candidate.sdpMLineIndex,
+                        }
+                    )
                 )
-            )
-            print(f"[gateway] sent ICE: {candidate.type} {candidate.ip}:{candidate.port}")
+                print(f"[gateway] sent ICE: {candidate.type} {candidate.ip}:{candidate.port}")
+        except asyncio.CancelledError:
+            raise
 
     async def run(self) -> None:
         while True:
@@ -186,12 +185,12 @@ class Gateway:
                 await asyncio.sleep(3)
 
     async def _connect(self) -> None:
-        async with websockets.connect(ARGS.signaling) as ws:
+        async with websockets.connect(ARGS.signaling, ping_interval=20, ping_timeout=10) as ws:
             self.ws = ws
             await ws.send(
                 json.dumps({"type": "register", "role": "gateway", "id": ARGS.public_ip})
             )
-            print(f"[gateway] registered as gateway:{ARGS.public_ip} at {ARGS.signaling}")
+            print(f"[gateway] registered as gateway:{ARGS.public_ip} at {ARGS.signaling} (heartbeat: 20s/10s)")
 
             async for raw in ws:
                 msg = json.loads(raw)
@@ -201,8 +200,10 @@ class Gateway:
                     print("[gateway] offer received")
                     if self.pc:
                         await self.pc.close()
+                    if self._ice_task:
+                        self._ice_task.cancel()
                     self.setup_peer()
-                    asyncio.create_task(self.send_ice_loop())
+                    self._ice_task = asyncio.create_task(self.send_ice_loop())
 
                     await self.pc.setRemoteDescription(
                         RTCSessionDescription(sdp=msg["sdp"], type="offer")
@@ -238,8 +239,19 @@ class Gateway:
 
 
 if __name__ == "__main__":
+    _original_cde = asyncio.BaseEventLoop.create_datagram_endpoint
+
+    async def _patched_cde(self, protocol_factory, local_addr=None, **kwargs):
+        if local_addr and isinstance(local_addr, tuple) and len(local_addr) >= 2 and local_addr[1] == 0:
+            local_addr = (local_addr[0], ARGS.webrtc_port)
+        return await _original_cde(self, protocol_factory, local_addr=local_addr, **kwargs)
+
+    asyncio.BaseEventLoop.create_datagram_endpoint = _patched_cde
+
     gateway = Gateway()
     try:
         asyncio.run(gateway.run())
     except KeyboardInterrupt:
         print("\n[gateway] shutting down")
+    finally:
+        asyncio.BaseEventLoop.create_datagram_endpoint = _original_cde
