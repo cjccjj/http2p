@@ -2,13 +2,15 @@
 """WebRTC Gateway — bridges WebRTC Data Channel to a local legacy HTTP service.
 
 Usage:
-  python gateway.py --public-ip 1.2.3.4 --legacy-base http://127.0.0.1:4000
+  python gateway.py --public-ip 1.2.3.4 --legacy-base http://127.0.0.1:8080
+  python gateway.py --legacy-base http://127.0.0.1:8080   # auto-detect public IP
 """
 
 import argparse
 import asyncio
 import json
 import os
+import urllib.request
 from aiortc import (
     RTCPeerConnection,
     RTCSessionDescription,
@@ -19,12 +21,19 @@ import aiohttp
 import websockets
 
 
+def detect_public_ip() -> str:
+    try:
+        return urllib.request.urlopen("https://api.ipify.org", timeout=5).read().decode().strip()
+    except Exception:
+        return ""
+
+
 def parse_args() -> argparse.Namespace:
     p = argparse.ArgumentParser(description="WebRTC Data Bridge Gateway")
     p.add_argument(
         "--public-ip",
         default=os.getenv("PUBLIC_IP", ""),
-        help="Public IP the browser will connect to (required)",
+        help="Public IP the browser will connect to (auto-detected if omitted)",
     )
     p.add_argument(
         "--signaling",
@@ -50,7 +59,12 @@ def parse_args() -> argparse.Namespace:
     )
     args = p.parse_args()
     if not args.public_ip:
-        p.error("--public-ip is required")
+        detected = detect_public_ip()
+        if detected:
+            args.public_ip = detected
+            print(f"[gateway] auto-detected public IP: {detected}")
+        else:
+            p.error("--public-ip is required (could not auto-detect)")
     return args
 
 

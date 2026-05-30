@@ -32,6 +32,8 @@ Most situations have simpler solutions:
 
 ```bash
 pip install aiortc aiohttp websockets
+python gateway.py --legacy-base http://127.0.0.1:8080
+# or override: python gateway.py --public-ip 203.0.113.5 --legacy-base http://127.0.0.1:8080
 ```
 
 ### 2. Open firewall
@@ -55,7 +57,7 @@ python gateway.py --public-ip 203.0.113.5 --legacy-base http://127.0.0.1:8080
 
 | Flag | Default | Description |
 |---|---|---|
-| `--public-ip` | (required) | Your server's public IP |
+| `--public-ip` | auto-detected | Your server's public IP (detected automatically) |
 | `--legacy-base` | `http://127.0.0.1:8080` | Base URL of the HTTP server |
 | `--signaling` | `wss://http2p.cjccjj.workers.dev/ws` | Signaling server (or self-host) |
 | `--webrtc-port` | `40000` | UDP port for the WebRTC tunnel |
