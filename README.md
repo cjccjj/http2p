@@ -1,110 +1,121 @@
 # http2p
 
-**Access any HTTP resource from an HTTPS page — without modifying the resource, without CA certificates, and without routing data through a proxy.**
+**Access HTTP resources from an HTTPS browser page via a direct WebRTC P2P tunnel — no proxy, no CA certs, no mixed-content warnings.**
 
-## The Problem
+## When to use this
 
-Modern browsers block HTTPS pages from fetching HTTP content (mixed-content policy). You have an HTTP server — a legacy dashboard, an IoT device, an internal API — and you need to access it from a browser.
+You need **all three** of these:
 
-## Why Not Just Use a Reverse Proxy?
+1. **Browser-only client** — the consumer is a browser (HTTPS page blocked from fetching HTTP)
+2. **Direct P2P required** — data must not route through a proxy (compliance, latency, cost)
+3. **Legacy server can only do outbound** — behind NAT, no inbound ports, or you can't install certs
 
-A reverse proxy requires the proxy server to have network access to both the client and the legacy server. In many real-world situations this isn't possible:
+If any of these are missing, see [When not to use](#when-not-to-use).
 
-- The legacy server is behind NAT with no inbound ports
-- You don't control the HTTPS server or can't install CA certs
-- The legacy server is on a restricted network (outbound only)
-- Data must not route through a third-party server (compliance)
+## When not to use
 
-**http2p** solves this differently: a lightweight gateway runs near your legacy HTTP server. It establishes an outbound connection to a public signaling service. Your browser connects to the same signaling service, negotiates a direct P2P encrypted tunnel, and fetches the HTTP resource directly. No data routes through any proxy.
+Most situations have simpler solutions:
 
-```
-Browser ═══ WebRTC DTLS tunnel ═══ Gateway ─── HTTP ─── Legacy Server
-   │              (encrypted, direct)         (localhost)
-   │
-   └── wss://http2p.dx512.com/ws (signaling only, ~KB text)
-```
+| If… | Just use… |
+|---|---|
+| No browser involved (curl, scripts, servers) | The HTTP URL directly — no mixed-content block exists |
+| A reverse proxy is acceptable | nginx/caddy in front of the legacy server — 2 lines of config |
+| You can put HTTPS on the legacy server | Let's Encrypt + nginx — CA certs today are free and automated |
+| Your HTTP server has a public IP and inbound ports | Let's Encrypt + nginx again |
+| You just need a one-off file download | `curl -O http://…` and scp/ftp the file |
+
+**http2p is a niche tool for a specific constraint set.** If you're not hitting browser mixed-content + P2P + outbound-only simultaneously, use something simpler.
 
 ## Quick Start
 
-### 1. Install & run the gateway
-
-On the machine that can reach your HTTP server (same machine or same network):
+### 1. Install dependencies
 
 ```bash
 pip install aiortc aiohttp websockets
+```
+
+### 2. Open firewall
+
+One UDP port must be reachable from the internet for WebRTC. Default is `40000`.
+
+```bash
+# Example: iptables
+iptables -A INPUT -p udp --dport 40000 -j ACCEPT
+
+# Or on cloud/VPS: open the port in your security group / firewall rules
+```
+
+### 3. Run the gateway
+
+On the machine that can reach your HTTP server:
+
+```bash
 python gateway.py --public-ip 203.0.113.5 --legacy-base http://127.0.0.1:8080
 ```
 
-- `--public-ip`: The public IP browsers can reach (required)
-- `--legacy-base`: Base URL of your HTTP server (default: http://127.0.0.1:4000)
-- `--signaling`: Signaling server URL (default: our free public service)
+| Flag | Default | Description |
+|---|---|---|
+| `--public-ip` | (required) | Your server's public IP |
+| `--legacy-base` | `http://127.0.0.1:4000` | Base URL of the HTTP server |
+| `--signaling` | `wss://http2p.dx512.com/ws` | Signaling server (or self-host) |
+| `--webrtc-port` | `40000` | UDP port for the WebRTC tunnel |
 
-One UDP port must be open to the internet (default: 40000, configurable with `--webrtc-port`).
-
-### 2. Access from a browser
-
-Open:
+### 4. Access from a browser
 
 ```
 https://http2p.dx512.com/wr/203.0.113.5/path/to/file
 ```
 
-That's it. The browser connects to your gateway via WebRTC, fetches the file, and downloads it — no mixed-content warnings, no cert errors.
-
-### Manual mode (debug/development)
-
-Visit `https://http2p.dx512.com/` for an interactive debug panel where you can enter any HTTP URL to fetch.
+Or visit `https://http2p.dx512.com/` for the interactive debug panel.
 
 ## Architecture
 
+```
+Browser ═══ WebRTC DTLS tunnel ═══ Gateway ─── HTTP ─── Legacy Server
+   │         (encrypted, direct)       (local)
+   │
+   └── wss://signaling (SDP/ICE only, ~KB text)
+```
+
 | Component | Hosted by | Description |
 |---|---|---|
-| **Frontend** | Public service (free) | HTTPS page + JavaScript WebRTC client |
-| **Signaling** | Public service (free) | WebSocket relay for connection setup |
-| **Gateway** | **You run this** | Bridges WebRTC to your HTTP server |
+| **Frontend** | Public service | HTTPS page + JS WebRTC client |
+| **Signaling** | Public service | WebSocket relay for connection setup |
+| **Gateway** | **You run this** | Bridges WebRTC ↔ your HTTP server |
 
-The public service only handles signaling (a few KB of SDP/ICE text). All actual data transfers go through the direct P2P tunnel between your browser and your gateway. The signaling service never sees your data.
+Signaling sees only connection metadata (SDP/ICE). All data flows direct browser ↔ gateway.
 
-## Use Cases
+## Limitations
 
-- **Legacy dashboards**: Old monitoring/management panels on HTTP-only internal servers
-- **IoT devices**: Cameras, sensors, relays with plain HTTP APIs
-- **Build artifacts**: Internal Jenkins/Nexus artifacts → secure browser download
-- **Ad-hoc sharing**: `python gateway.py` on your laptop → share a URL with a colleague
-- **Staging access**: Dev servers on HTTP → temporary secure access without certs
-- **Configuration**: JSON config from an internal server → fetched securely by browser JS
-- **Kubernetes NodePort**: HTTP services → browser access without mixed-content block
+- **Primarily for static file/resource fetches.** The built-in frontend is a download page. POST, auth headers, and REST API patterns are not implemented on the frontend side — the gateway can handle them, but a custom JS client would be needed.
+- **One browser tab per gateway instance.** The gateway manages a single WebRTC session. Multiple tabs connecting to the same gateway will cause the first session to be replaced.
+- **Browser-only.** Requires JavaScript and WebRTC. Curl, wget, and server-side HTTP clients cannot use this.
+- **UDP port required.** The gateway machine must have one inbound UDP port open. Corporate firewalls that block UDP entirely will prevent WebRTC.
 
-## Configuration Reference
+## Self-hosting the signaling service
 
-```
-python gateway.py --help
-```
+If you don't want to use the free public service at `wss://http2p.dx512.com/ws`:
 
-| Flag | Default | Description |
-|---|---|---|
-| `--public-ip` | (required) | Public IP browsers connect to |
-| `--legacy-base` | `http://127.0.0.1:4000` | Base URL of your HTTP server |
-| `--signaling` | `wss://http2p.dx512.com/ws` | Signaling server URL |
-| `--webrtc-port` | `40000` | UDP port for WebRTC ICE |
+- **Cloudflare Workers:** Deploy `http2p_front/index.js` to your own Worker using `npx wrangler deploy`
+- **Python (dev):** Run `python signaling.py` (listens on `127.0.0.1:9877`)
+
+Then pass `--signaling wss://your-domain.com/ws` to the gateway.
+
+## FAQ
+
+**Q: Is this a proxy?** No. Data goes direct over an encrypted P2P DTLS tunnel. Signaling sees only SDP/ICE metadata.
+
+**Q: Gateway behind NAT?** The gateway discovers its public IP via STUN. If STUN is blocked, specify `--public-ip`. Forward the UDP `--webrtc-port` on your firewall.
+
+**Q: Multiple concurrent users?** Yes — each user connects to a *different* gateway instance. Different gateway IPs are independent. (Same gateway = single session.)
 
 ## Requirements
 
 - Python 3.10+
-- The gateway machine needs **outbound internet** (WebSocket to signaling)
-- One **inbound UDP port** accessible from the internet (for the WebRTC tunnel)
-- The HTTP server you want to expose must be reachable from the gateway (usually localhost or same network)
-
-## FAQ
-
-**Q: Is this a proxy?** No. The data goes directly from the gateway to your browser via an encrypted P2P tunnel. The signaling server only sees connection metadata (SDP/ICE, ~KB).
-
-**Q: What if my gateway is behind NAT?** The gateway uses STUN to discover its public IP. If STUN is blocked, specify `--public-ip` with your known public IP. The firewall must forward the `--webrtc-port` UDP port.
-
-**Q: Does it work with curl/wget?** No. The browser must run JavaScript to establish the WebRTC connection. This is a browser-based tool.
-
-**Q: Can I use this commercially?** This software is free for non-commercial use. See LICENSE.
+- Outbound internet (gateway → signaling WebSocket)
+- One inbound UDP port (internet → gateway WebRTC)
+- The legacy HTTP server must be reachable from the gateway
 
 ## License
 
-This project is licensed under a custom non-commercial license. See [LICENSE](LICENSE) for details.
+Custom non-commercial license. See [LICENSE](LICENSE).
