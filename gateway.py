@@ -63,8 +63,11 @@ def parse_args() -> argparse.Namespace:
         if detected:
             args.public_ip = detected
             print(f"[gateway] auto-detected public IP: {detected}")
+            print("[gateway] warning: if your machine uses an HTTP proxy, the detected IP"
+                  " may be the proxy's IP — use --public-ip to set manually")
         else:
-            p.error("--public-ip is required (could not auto-detect)")
+            p.error("--public-ip is required (could not auto-detect your public IP,"
+                    " set it manually with --public-ip or the PUBLIC_IP env var)")
     return args
 
 

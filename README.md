@@ -32,8 +32,6 @@ Most situations have simpler solutions:
 
 ```bash
 pip install aiortc aiohttp websockets
-python gateway.py --legacy-base http://127.0.0.1:8080
-# or override: python gateway.py --public-ip 203.0.113.5 --legacy-base http://127.0.0.1:8080
 ```
 
 ### 2. Open firewall
@@ -52,23 +50,35 @@ iptables -A INPUT -p udp --dport 40000 -j ACCEPT
 On the machine that can reach your HTTP server:
 
 ```bash
+python gateway.py --legacy-base http://127.0.0.1:8080
+```
+
+That's it — the gateway auto-detects your public IP and connects to the signaling service.
+
+### 4. Access from a browser
+
+```
+https://http2p.cjccjj.workers.dev/wr/<your-ip>/path/to/file
+```
+
+Or visit `https://http2p.cjccjj.workers.dev/` for the interactive debug panel.
+
+### Advanced: Public IP
+
+The gateway auto-detects your public IP by querying an external service. You can override it:
+
+```bash
 python gateway.py --public-ip 203.0.113.5 --legacy-base http://127.0.0.1:8080
 ```
 
 | Flag | Default | Description |
 |---|---|---|
-| `--public-ip` | auto-detected | Your server's public IP (detected automatically) |
-| `--legacy-base` | `http://127.0.0.1:8080` | Base URL of the HTTP server |
-| `--signaling` | `wss://http2p.cjccjj.workers.dev/ws` | Signaling server (or self-host) |
+| `--public-ip` | auto-detected | Public IP browsers reach your gateway at |
+| `--legacy-base` | `http://127.0.0.1:8080` | Base URL of your HTTP server |
+| `--signaling` | `wss://http2p.cjccjj.workers.dev/ws` | Signaling server URL |
 | `--webrtc-port` | `40000` | UDP port for the WebRTC tunnel |
 
-### 4. Access from a browser
-
-```
-https://http2p.cjccjj.workers.dev/wr/203.0.113.5/path/to/file
-```
-
-Or visit `https://http2p.cjccjj.workers.dev/` for the interactive debug panel.
+**Proxy warning:** If your machine routes HTTP through a proxy (e.g. `HTTP_PROXY` env var), the auto-detected IP will be the *proxy's* IP, not your machine's. Whether that's correct or not depends on your setup. If the browser can't reach your machine via the proxy's IP, set `--public-ip` manually. If auto-detection fails entirely, the gateway will ask you to provide `--public-ip`.
 
 ## Architecture
 
